@@ -20,6 +20,7 @@ The patches included here are either official patches by:
 
 	- EA (Embedded Artists)
 	- NXP
+	- Unknown source (code might have been modified)
 
 The reason this repository exists is that patch files and CDL* drivers
 either...:
