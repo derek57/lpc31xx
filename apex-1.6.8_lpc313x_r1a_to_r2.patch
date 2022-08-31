@@ -1,0 +1,405 @@
+diff -purN apex-1.6.8/src/mach-lpc313x/drv-dm9000.h work_1.6.8/src/mach-lpc313x/drv-dm9000.h
+--- apex-1.6.8/src/mach-lpc313x/drv-dm9000.h	2009-07-06 15:22:44.000000000 -0700
++++ work_1.6.8/src/mach-lpc313x/drv-dm9000.h	2009-07-01 16:56:09.000000000 -0700
+@@ -29,8 +29,14 @@
+ 
+ # define DM_WIDTH	16
+ 
+-/* Use the second static bank, with fast timings, as an IOBARRIER */
+-# define DM_IO_DELAY	(*(volatile unsigned char __force*) EXT_SRAM0_PHYS)
++/* Use the second static bank, with fast timings, as an IOBARRIER. ARM MPMC contoller
++as part of low power design doesn't de-assert nCS and nOE for consecutive reads but 
++just changes address. But DM9000 requires nCS and nOE change between address. So access
++other chip select area to force de-assertion of nCS and nOE. Or else wait for long time 
++such as 80 usecs. */
++
++/* if EA_DISP_QVGA_LCD_V2 is used then use following macro else use udelay macro */
++# define DM_IO_DELAY	do { *(volatile unsigned char __force*) (EXT_SRAM0_PHYS) = 0;} while(0)
+ //# define DM_IO_DELAY	udelay(80)
+ 
+ # define DM_PHYS	(EXT_SRAM1_PHYS)		/* Dev MAC/PHY */
+diff -purN apex-1.6.8/src/mach-lpc313x/ea313x_v1_config work_1.6.8/src/mach-lpc313x/ea313x_v1_config
+--- apex-1.6.8/src/mach-lpc313x/ea313x_v1_config	2009-07-06 15:22:44.000000000 -0700
++++ work_1.6.8/src/mach-lpc313x/ea313x_v1_config	2009-07-06 14:42:14.000000000 -0700
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: KERNELVERSION
+-# Tue May 26 17:56:01 2009
++# Mon Jul  6 14:41:30 2009
+ #
+ CONFIG_ARM=y
+ CONFIG_CPU_ARMV5=y
+@@ -55,6 +55,7 @@ CONFIG_MACH_EA313x_V1=y
+ CONFIG_OSC_FREQ=12000000
+ CONFIG_PLL_180=y
+ # CONFIG_PLL_270 is not set
++CONFIG_DYNAMIC_CLOCKS=y
+ # CONFIG_USB_BOOT is not set
+ CONFIG_MICRON_MT29F2G08=y
+ # CONFIG_SAMSUNG_K9K8G is not set
+diff -purN apex-1.6.8/src/mach-lpc313x/ea313x_v2_config work_1.6.8/src/mach-lpc313x/ea313x_v2_config
+--- apex-1.6.8/src/mach-lpc313x/ea313x_v2_config	2009-07-06 15:22:44.000000000 -0700
++++ work_1.6.8/src/mach-lpc313x/ea313x_v2_config	2009-07-06 14:51:35.000000000 -0700
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: KERNELVERSION
+-# Tue May 26 17:57:48 2009
++# Mon Jul  6 14:51:28 2009
+ #
+ CONFIG_ARM=y
+ CONFIG_CPU_ARMV5=y
+@@ -40,10 +40,8 @@ CONFIG_ATAG_PHYS=0x30000100
+ CONFIG_ARCH_NUMBER=9998
+ CONFIG_APEX_VMA=0x11029000
+ CONFIG_KERNEL_LMA=0x30008000
+-CONFIG_USE_RAMDISK=y
+-CONFIG_RAMDISK_LMA=0x32000000
++# CONFIG_USE_RAMDISK is not set
+ CONFIG_MACH="lpc313x"
+-CONFIG_RAMDISK_SIZE=0x00300000
+ # CONFIG_MACH_VAL3153 is not set
+ # CONFIG_MACH_VAL3154 is not set
+ # CONFIG_MACH_EA313x_V1 is not set
+@@ -55,6 +53,7 @@ CONFIG_MACH_EA313x_V2=y
+ CONFIG_OSC_FREQ=12000000
+ CONFIG_PLL_180=y
+ # CONFIG_PLL_270 is not set
++CONFIG_DYNAMIC_CLOCKS=y
+ # CONFIG_USB_BOOT is not set
+ CONFIG_MICRON_MT29F2G08=y
+ # CONFIG_SAMSUNG_K9K8G is not set
+@@ -155,13 +154,12 @@ CONFIG_NO_BOOTSTRAP=y
+ # Regions
+ #
+ CONFIG_ENV_REGION_KERNEL="tftp://$serverip/zImage"
+-CONFIG_ENV_REGION_RAMDISK="tftp://$serverip/ramdisk_image.gz"
+ 
+ #
+ # Overrides
+ #
+ # CONFIG_ENV_DEFAULT_CMDLINE_OVERRIDE is not set
+ CONFIG_ENV_DEFAULT_STARTUP_OVERRIDE=y
+-CONFIG_ENV_DEFAULT_STARTUP="eth mac 00:08:ee:00:80:43;ipconfig rarp; copy $kernelsrc $bootaddr; copy $ramdisksrc $ramdiskaddr;boot"
++CONFIG_ENV_DEFAULT_STARTUP="eth mac 00:08:ee:00:80:43;ipconfig rarp; copy $kernelsrc $bootaddr; boot"
+ CONFIG_RELOCATE_SIMPLE=y
+ CONFIG_ALIASES=y
+diff -purN apex-1.6.8/src/mach-lpc313x/env.c work_1.6.8/src/mach-lpc313x/env.c
+--- apex-1.6.8/src/mach-lpc313x/env.c	2009-07-06 15:22:44.000000000 -0700
++++ work_1.6.8/src/mach-lpc313x/env.c	2009-07-02 10:43:31.000000000 -0700
+@@ -28,8 +28,12 @@
+ 
+ __env struct env_d e_cmdline = {
+   .key = "cmdline",
+-  //.default_value = "console=ttyS0,115200n8 root=/dev/nfs rw nfsroot=/tftpboot/arm ip=rarp loglevel=7",
+-  .default_value = "console=ttyS0,115200n8 root=/dev/ram0 rw loglevel=7",
++#if defined(CONFIG_MACH_VAL3153) || defined(CONFIG_MACH_EA313x_V2)
++  .default_value = "console=ttyS0,115200n8 root=/dev/nfs rw nfsroot=/tftpboot/arm ip=rarp loglevel=7",
++  //.default_value = "console=ttyS0,115200n8 root=/dev/ram0 rw ip=rarp loglevel=7 ramdisk_size=12000K",
++#else
++  .default_value = "console=ttyS0,115200n8 root=/dev/ram0 rw loglevel=7 ramdisk_size=12000K",
++#endif
+   .description = "Linux kernel command line",
+ };
+ 
+diff -purN apex-1.6.8/src/mach-lpc313x/initialize.c work_1.6.8/src/mach-lpc313x/initialize.c
+--- apex-1.6.8/src/mach-lpc313x/initialize.c	2009-07-06 15:22:44.000000000 -0700
++++ work_1.6.8/src/mach-lpc313x/initialize.c	2009-07-06 14:56:52.000000000 -0700
+@@ -31,8 +31,9 @@
+ #include <debug_ll.h>
+ 
+ //{fin_select; ndec; mdec; pdec; selr; seli; selp; mode; freq;}
+-#if (CONFIG_OSC_FREQ == 6000000)
+-#define PLL_180M  {CGU_FIN_SELECT_FFAST, 770,  27306, 98, 0, 32, 16, 0, 180000000}
++#if (CONFIG_OSC_FREQ == 24000000)
++#define PLL_180M  {CGU_FIN_SELECT_FFAST, 514,  8191, 98, 0, 16,  8, 0, 180000000}
++#define PLL_270M  {CGU_FIN_SELECT_FFAST,   2, 19660, 98, 0, 48, 23, 0, 180000000}
+ #else
+ #define PLL_180M  {CGU_FIN_SELECT_FFAST, 770,  8191, 98, 0, 16,  8, 0, 180000000}
+ #define PLL_270M  {CGU_FIN_SELECT_FFAST, 514, 19660, 98, 0, 48, 23, 0, 270000000}
+@@ -42,6 +43,7 @@
+ 
+ #define CUR_PLL_SET     PLL_180M
+ #define HCLK          (90 * 1000000ull)
++#define PLLCLK        (180 * 1000000ull)
+ extern const CGU_CLKS_INIT_T g_cgu_default_clks_2;
+ #define DEFAULT_CFG   &g_cgu_default_clks_2
+ 
+@@ -49,6 +51,8 @@ extern const CGU_CLKS_INIT_T g_cgu_defau
+ 
+ #define CUR_PLL_SET     PLL_270M
+ #define HCLK          (90 * 1000000ull)
++#define PLLCLK        (270 * 1000000ull)
++
+ extern const CGU_CLKS_INIT_T g_cgu_default_clks_3;
+ #define DEFAULT_CFG   &g_cgu_default_clks_3
+ 
+@@ -172,7 +176,8 @@ void __naked __section (.bootstrap) init
+   
+   /* check the jumpers are set for EBI mode or not before proceeding 
+   further.*/
+-	/* NOR flash, 16 bit */
++#if defined(CONFIG_MACH_VAL3153)
++  /* NOR flash, 16 bit */
+   MPMC_STCONFIG0  = 0x81;
+   MPMC_STWTWEN0   = 1;
+   MPMC_STWTOEN0   = 1;
+@@ -180,7 +185,7 @@ void __naked __section (.bootstrap) init
+   MPMC_STWTPG0    = 2;
+   MPMC_STWTWR0    = 6;
+   MPMC_STWTTURN0  = 1;
+-	/* ethernet, 16 bit */
++  /* ethernet, 16 bit */
+   MPMC_STCONFIG1  = 0x81;
+   MPMC_STWTWEN1   = 4;
+   MPMC_STWTOEN1   = 4;
+@@ -188,6 +193,24 @@ void __naked __section (.bootstrap) init
+   MPMC_STWTPG1    = 0xFF;
+   MPMC_STWTWR1    = 16;
+   MPMC_STWTTURN1  = 6;
++#elif defined(CONFIG_MACH_EA313x_V1) || defined(CONFIG_MACH_EA313x_V2)
++  /* LCD display, 16 bit */
++  MPMC_STCONFIG0  = 0x81;
++  MPMC_STWTWEN0   = 2;
++  MPMC_STWTOEN0   = 1;
++  MPMC_STWTRD0    = 15;
++  MPMC_STWTPG0    = 2;
++  MPMC_STWTWR0    = 4;
++  MPMC_STWTTURN0  = 2;
++  /* ethernet DM9000, 16 bit */
++  MPMC_STCONFIG1  = 0x81;
++  MPMC_STWTWEN1   = 1;
++  MPMC_STWTOEN1   = 1;
++  MPMC_STWTRD1    = 3;
++  MPMC_STWTPG1    = 1;
++  MPMC_STWTWR1    = 1;
++  MPMC_STWTTURN1  = 2;
++#endif
+   
+   /* toggle OE for consecutive reads */
+   //SYS_MPMC_WTD_DEL1 = (18 << 0) | (1 << 5);
+@@ -231,6 +254,14 @@ void __naked __section (.bootstrap) init
+   MPMC_DYCONFIG |= MPMC_SDRAMC_CFG_BUF_EN;
+   MPMC_DYNCTL = MPMC_SDRAMC_CTL_NORMAL_CMD | MPMC_SDRAMC_CTL_CS;
+ 
++#if defined(CONFIG_DYNAMIC_CLOCKS)
++  /* program dynamic referesh clock for external refresh generator also.
++  Used during dynamic clock scaling done by CGU. */
++  SYS_MPMC_TESTMODE0 = (NS_TO_MPMCCLK(7812, PLLCLK)/16) | _BIT(12);
++  /*testMode1 = (10+ Trp/(1/MPMC_CLK) + Trfc/(1/MPMC_CLK)) * baseclock/ MPMC_clk */
++  SYS_MPMC_TESTMODE1 = (10 + NS_TO_MPMCCLK(20, HCLK) + NS_TO_MPMCCLK(66, HCLK)) * (PLLCLK/HCLK);
++#endif
++
+   __asm volatile ("mov r0, #-1\t\n"
+ 		  "mov pc, %0" : : "r" (lr));
+ }
+diff -purN apex-1.6.8/src/mach-lpc313x/Kconfig work_1.6.8/src/mach-lpc313x/Kconfig
+--- apex-1.6.8/src/mach-lpc313x/Kconfig	2009-07-06 15:22:44.000000000 -0700
++++ work_1.6.8/src/mach-lpc313x/Kconfig	2009-07-06 14:40:29.000000000 -0700
+@@ -49,6 +49,19 @@ config PLL_270
+ 
+ endchoice
+ 
++config DYNAMIC_CLOCKS
++	bool "Enable automatic clock scaling"
++	help
++	  Enables automatic clock scaling feature present in CGU. Whenever
++	  AHB bus system is inactive CGU automaticly switches the FDC0 to FDC7
++	  to DynFDC0 to DyncFDC7.   
++	  
++config USB_BOOT
++	bool "Enable LPC313x USB boot method"
++	help
++	  Make sure you have copied usbmsc.d file under 
++	  src\mach-lpc313x\usb directory.   
++	  
+ config ATAG_PHYS
+ 	hex "Physical address for ATAGs list"
+ 	default "0x30000100"
+@@ -65,12 +78,6 @@ config ARCH_NUMBER
+ 	default 9998 if (MACH_EA313x_V1 || MACH_EA313x_V2)
+ 	default 9997 if (MACH_VAL3154)
+ 
+-config USB_BOOT
+-	bool "Enable LPC313x USB boot method"
+-	help
+-	  Make sure you have copied usbmsc.d file under 
+-	  src\mach-lpc313x\usb directory.   
+-	  
+ config APEX_VMA
+ 	hex "APEX Runtime Address"
+ 	default "0x11029000"
+diff -purN apex-1.6.8/src/mach-lpc313x/lpc313x_cgu_default.c work_1.6.8/src/mach-lpc313x/lpc313x_cgu_default.c
+--- apex-1.6.8/src/mach-lpc313x/lpc313x_cgu_default.c	2009-07-06 15:22:44.000000000 -0700
++++ work_1.6.8/src/mach-lpc313x/lpc313x_cgu_default.c	2009-07-06 14:13:27.000000000 -0700
+@@ -332,7 +332,7 @@ const CGU_CLKS_INIT_T const g_cgu_defaul
+     },
+     {
+       0x1FF,
+-      {1, 1, 6}	/*DynFD4*/
++      {0, 0, 0}	/*DynFD4 - SD_MMC clock doesn't like dynamic switching*/
+     },
+     {
+       0x1FF,
+@@ -467,23 +467,23 @@ const CGU_CLKS_INIT_T g_cgu_default_clks
+     },
+     {
+       0x1FF,
+-      {1, 1, 3}	/*DynFD2*/
++      {1, 1, 2}	/*DynFD2*/
+     },
+     {
+       0x1FF,
+-      {1, 1, 6}	/*DynFD3*/
++      {1, 1, 4}	/*DynFD3*/
+     },
+     {
+       0x1FF,
+-      {1, 1, 6}	/*DynFD4*/
++      {0, 0, 0}	/*DynFD4 - SD_MMC clock doesn't like dynamic switching*/
+     },
+     {
+       0x1FF,
+-      {1, 1, 6}	/*DynFD5*/
++      {1, 1, 4}	/*DynFD5*/
+     },
+     {
+       0x1FF,
+-      {1, 1, 3}	/*DynFD6*/
++      {1, 1, 2}	/*DynFD6*/
+     }
+   }
+ };
+diff -purN apex-1.6.8/src/mach-lpc313x/lpc313x_cgu_driver.c work_1.6.8/src/mach-lpc313x/lpc313x_cgu_driver.c
+--- apex-1.6.8/src/mach-lpc313x/lpc313x_cgu_driver.c	2009-07-06 15:22:44.000000000 -0700
++++ work_1.6.8/src/mach-lpc313x/lpc313x_cgu_driver.c	2009-07-06 14:56:47.000000000 -0700
+@@ -295,7 +295,10 @@ void __section (.bootstrap) cgu_ClkId2Do
+ *
+ **********************************************************************/
+ /* frac divider config function */
+-u32 __section (.bootstrap) cgu_fdiv_config(u32 fdId, CGU_FDIV_SETUP_T fdivCfg, u32 enable)
++u32 __section (.bootstrap) cgu_fdiv_config(u32 fdId, 
++					   CGU_FDIV_SETUP_T fdivCfg, 
++					   u32 enable,
++					   u32 dyn_fdc)
+ {
+   u32 conf, maddw, msubw, maxw, fdWidth;
+   int madd, msub;
+@@ -330,7 +333,15 @@ u32 __section (.bootstrap) cgu_fdiv_conf
+     conf |= CGU_SB_FDC_RUN;
+ 
+   /* finally configure the divider*/
+-  CGU_SB->base_fdc[fdId] = conf;
++  if (0 == dyn_fdc)
++  {
++	CGU_SB->base_fdc[fdId] = conf;
++  }
++  else
++  {
++	  if (fdId < CGU_SB_NR_DYN_FDIV)
++		CGU_SB->base_dyn_fdc[fdId] = conf | CGU_SB_DYN_FDC_ALLOW;
++  }
+ 
+   return conf;
+ }
+@@ -370,7 +381,7 @@ void __section (.bootstrap) cgu_init_dom
+   for (fd_id = 0; fd_id < pDomain->fdiv_cnt; fd_id++, psub++)
+   {
+     /* set fractional dividers but don't enable them yet*/
+-    fdiv_conf = cgu_fdiv_config(fd_id + pDomain->fdiv_min, psub->fdiv_cfg, 0);
++    fdiv_conf = cgu_fdiv_config(fd_id + pDomain->fdiv_min, psub->fdiv_cfg, 0, 0);
+ 
+     /* enable frac divider only if it has valid settings. Or else it may be unused*/
+     if (fdiv_conf != 0)
+@@ -559,6 +570,7 @@ void __section (.bootstrap) cgu_reset_al
+ int __section (.bootstrap) cgu_init_clks(const CGU_CLKS_INIT_T* pClksCfg)
+ {
+   CGU_DOMAIN_CFG_T domain;
++  int i;
+ 
+   /* reset all clocks and connect them to FFAST */
+   cgu_reset_all_clks();
+@@ -701,7 +713,25 @@ int __section (.bootstrap) cgu_init_clks
+   /**********************************************************/
+   /* initiliase Dynamic fractional dividers TBD */
+   /**********************************************************/
++#if defined(CONFIG_DYNAMIC_CLOCKS)
++  /* disable BCR for domain */
++  CGU_SB->base_bcr[0] = 0;
++  for (i = 0; i < CGU_SB_NR_DYN_FDIV; i++) 
++  {
++	  if (pClksCfg->dyn_fdiv_cfg[i].cfg.n != 0)
++	  {
++		  CGU_SB->base_dyn_sel[i] = pClksCfg->dyn_fdiv_cfg[i].sel;
++		  cgu_fdiv_config(i, pClksCfg->dyn_fdiv_cfg[i].cfg, 1, 1);
++	  }
++	  else
++	  {
++		  CGU_SB->base_dyn_fdc[i] = 0;
++	  }
++
++  }
+ 
++  CGU_SB->base_bcr[0] = CGU_SB_BCR_FD_RUN;
++#endif
+ 
+   return 0;
+ }
+@@ -1056,7 +1086,7 @@ void __section (.bootstrap) cgu_set_subd
+       CGU_SB->base_bcr[bcrId] = 0;
+     }
+     /* change fractional divider */
+-    cgu_fdiv_config(subDomainId, fdiv_cfg, 1);
++    cgu_fdiv_config(subDomainId, fdiv_cfg, 1, 0);
+     /* enable BCRs */
+     if (bcrId != CGU_INVALID_ID)
+     {
+diff -purN apex-1.6.8/src/mach-lpc313x/lpc313x.h work_1.6.8/src/mach-lpc313x/lpc313x.h
+--- apex-1.6.8/src/mach-lpc313x/lpc313x.h	2009-07-06 15:22:44.000000000 -0700
++++ work_1.6.8/src/mach-lpc313x/lpc313x.h	2009-06-12 10:49:25.000000000 -0700
+@@ -135,6 +135,8 @@
+ #define SYS_MPMC_DELAY      __REG (SYS_PHYS + 0x68)
+ #define SYS_MPMC_WTD_DEL0   __REG (SYS_PHYS + 0x6C)
+ #define SYS_MPMC_WTD_DEL1   __REG (SYS_PHYS + 0x70)
++#define SYS_MPMC_TESTMODE0  __REG (SYS_PHYS + 0x78)
++#define SYS_MPMC_TESTMODE1  __REG (SYS_PHYS + 0x7C)
+ #define SYS_REMAP_ADDR      __REG (SYS_PHYS + 0x84)
+ #define SYS_MUX_LCD_EBI     __REG (SYS_PHYS + 0x90)
+ #define SYS_MUX_GPIO_MCI    __REG (SYS_PHYS + 0x94)
+diff -purN apex-1.6.8/src/mach-lpc313x/serial.c work_1.6.8/src/mach-lpc313x/serial.c
+--- apex-1.6.8/src/mach-lpc313x/serial.c	2009-07-06 15:22:44.000000000 -0700
++++ work_1.6.8/src/mach-lpc313x/serial.c	2009-07-02 12:45:10.000000000 -0700
+@@ -26,9 +26,9 @@
+ 
+ 
+ //#include <debug_ll.h>
+-#if (CONFIG_OSC_FREQ == 6000000)
+-#define UART_BRD_115200		(3)
+-#define UART_FDR_115200		((12 << 4) | (1 << 0))
++#if (CONFIG_OSC_FREQ == 24000000)
++#define UART_BRD_115200		(13)
++#define UART_FDR_115200		((1 << 4) | (0 << 0))
+ #else
+ #define UART_BRD_115200		(3)
+ #define UART_FDR_115200		((6 << 4) | (7 << 0))
+diff -purN apex-1.6.8/src/mach-lpc313x/val314x_config work_1.6.8/src/mach-lpc313x/val314x_config
+--- apex-1.6.8/src/mach-lpc313x/val314x_config	2009-07-06 15:22:44.000000000 -0700
++++ work_1.6.8/src/mach-lpc313x/val314x_config	2009-07-06 15:20:53.000000000 -0700
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: KERNELVERSION
+-# Tue May 26 17:59:11 2009
++# Mon Jul  6 15:20:37 2009
+ #
+ CONFIG_ARM=y
+ CONFIG_CPU_ARMV5=y
+@@ -55,6 +55,7 @@ CONFIG_MACH_VAL3153=y
+ CONFIG_OSC_FREQ=12000000
+ # CONFIG_PLL_180 is not set
+ CONFIG_PLL_270=y
++CONFIG_DYNAMIC_CLOCKS=y
+ # CONFIG_USB_BOOT is not set
+ CONFIG_MICRON_MT29F2G08=y
+ # CONFIG_SAMSUNG_K9K8G is not set
