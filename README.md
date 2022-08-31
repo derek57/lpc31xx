@@ -9,18 +9,10 @@ It includes (some) of these...
 		1.1.) APEX Bootloader
 		1.2.) U-Boot Bootloader
 
-	2.) NXP CDL* drivers:
-		2.1.) v0.03
-		2.2.) v0.06
-		2.3.) v1.01
-		2.4.) Unknown Release #1
-		2.5.) Unknown Release #2
-
 The patches included here are either official patches by:
 
 	- EA (Embedded Artists)
 	- NXP
-	- Unknown source (code might have been modified)
 
 The reason this repository exists is that patch files and CDL* drivers
 either...:
@@ -33,5 +25,3 @@ mentioned, started.
 
 Hopefully this will help others who still have devkits laying around
 or even code repos which are missing any of this.
-
-* CDL = (C)ommon (D)river (L)ibrary
