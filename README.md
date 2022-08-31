@@ -6,8 +6,9 @@ It includes (some) of these...
 
 
 	1.) Bootloader patches for:
-		1.1.) APEX Bootloader
-		1.2.) U-Boot Bootloader
+		1.1.) APEX Bootloader v1.6.8
+		1.2.) U-Boot Bootloader v1.3.4
+		1.3.) Linux Kernel v2.6.29
 
 The patches included here are either official patches by:
 
